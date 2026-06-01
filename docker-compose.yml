@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+
+  oracle-db:
+    build: ./db
+    container_name: oracle-db
+    environment:
+      ORACLE_PWD: ${ORACLE_PWD:-Oracle123}
+      ORACLE_CHARACTERSET: AL32UTF8
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+      - ./db/init:/opt/oracle/scripts/startup
+    healthcheck:
+      test: ["CMD", "sqlplus", "-s", "system/${ORACLE_PWD}@//localhost:1521/XEPDB1",
+             "<<< 'SELECT 1 FROM DUAL;'"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+  agent:
+    build: ./agent
+    container_name: nl2sql-agent
+    environment:
+      GEMINI_API_KEY: ${GEMINI_API_KEY}
+      ORACLE_HOST: oracle-db
+      ORACLE_PORT: 1521
+      ORACLE_SERVICE: XEPDB1
+      ORACLE_USER: welldata
+      ORACLE_PWD: ${ORACLE_PWD:-Oracle123}
+      CHROMA_PATH: /app/chroma_db
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/app/chroma_db
+    depends_on:
+      oracle-db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: nl2sql-frontend
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - agent
+
+volumes:
+  oracle_data:
+  chroma_data:

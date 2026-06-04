@@ -1,4 +1,4 @@
-import { Clipboard, CheckCircle, BarChart, LineChart, Scatter, PieChart } from 'lucide-react'
+import { Clipboard, CheckCircle, BarChart, LineChart, Activity, PieChart } from 'lucide-react'
 import { QueryResponse } from '../api/client'
 
 interface Props {
@@ -8,7 +8,7 @@ interface Props {
 const chartIcons: Record<string, JSX.Element> = {
   bar: <BarChart size={16} />,
   line: <LineChart size={16} />,
-  scatter: <Scatter size={16} />,
+  scatter: <Activity size={16} />,
   pie: <PieChart size={16} />,
   none: <CheckCircle size={16} />,
 }

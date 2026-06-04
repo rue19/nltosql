@@ -10,7 +10,11 @@ def get_engine():
         f"oracle+oracledb://{settings.oracle_user}:{settings.oracle_pwd}"
         f"@{settings.oracle_host}:{settings.oracle_port}/?service_name={settings.oracle_service}"
     )
-    return create_engine(dsn, poolclass=NullPool)
+    return create_engine(
+        dsn, 
+        poolclass=NullPool,
+        connect_args={"mode": oracledb.DEFAULT_AUTH}
+    )
 
 
 def run_query(sql: str) -> dict[str, Any]:

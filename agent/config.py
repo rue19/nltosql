@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     oracle_pwd: str = "Oracle123"
     chroma_path: str = "./chroma_db"
     embed_model: str = "all-MiniLM-L6-v2"
-    gemini_model: str = "gemini-1.5-flash"
+    gemini_model: str = "gemini-flash-latest"
     max_rows: int = 500
 
     class Config:

@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.routes import router
 from rag.embedder import build_vector_store
 
-app = FastAPI(title="NL2SQL Agent", version="1.0.0")
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="NL2SQL Agent", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,6 +18,12 @@ app.add_middleware(
 
 app.include_router(router, prefix="/api")
 
+
 @app.on_event("startup")
 async def startup():
-    build_vector_store()  # no-op if already built
+    logger.info("Building ChromaDB vector store from schema manifest...")
+    try:
+        build_vector_store()
+        logger.info("ChromaDB vector store ready.")
+    except Exception as exc:
+        logger.warning("ChromaDB build failed: %s. Falling back to full schema.", exc)

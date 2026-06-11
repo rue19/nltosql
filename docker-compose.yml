@@ -30,11 +30,13 @@ services:
       ORACLE_SERVICE: XEPDB1
       ORACLE_USER: welldata
       ORACLE_PWD: ${ORACLE_PWD:-Oracle123}
-      CHROMA_PATH: /app/chroma_db
+      USE_LOCAL_LLM: ${USE_LOCAL_LLM:-false}
+      QWEN_MODEL_PATH: /app/models/qwen2.5-0.5b-instruct-q4_k_m.gguf
     ports:
       - "8000:8000"
     volumes:
       - chroma_data:/app/chroma_db
+      - ./models:/app/models
     depends_on:
       oracle-db:
         condition: service_healthy

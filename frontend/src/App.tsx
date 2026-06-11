@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { AlertCircle, Play } from 'lucide-react'
+import { AlertCircle, Play, Table2, BarChart3, Download } from 'lucide-react'
 import { runQuery, QueryResponse } from './api/client'
 import QueryInput from './components/QueryInput'
 import ResultTable from './components/ResultTable'
@@ -13,6 +13,8 @@ interface HistoryItem {
   timestamp: string
 }
 
+type ViewMode = 'table' | 'chart' | 'both'
+
 function App() {
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
@@ -20,6 +22,7 @@ function App() {
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [nextId, setNextId] = useState(1)
   const [error, setError] = useState('')
+  const [viewMode, setViewMode] = useState<ViewMode>('both')
 
   const historyMap = useMemo(() => history.reduce<Record<string, HistoryItem>>((acc, item) => {
     acc[item.question] = item
@@ -59,6 +62,8 @@ function App() {
     setHistory((current) => current.filter((item) => item.id !== id))
   }
 
+  const hasResult = result && !result.error && result.rows.length > 0
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -90,9 +95,29 @@ function App() {
           ) : null}
           {result ? <StatusBar result={result} /> : null}
         </div>
+        {hasResult ? (
+          <div className="view-toggle-bar">
+            <button
+              className={`view-toggle-btn ${viewMode === 'table' || viewMode === 'both' ? 'active' : ''}`}
+              onClick={() => setViewMode(viewMode === 'table' ? 'both' : 'table')}
+            >
+              <Table2 size={14} /> Table
+            </button>
+            <button
+              className={`view-toggle-btn ${viewMode === 'chart' || viewMode === 'both' ? 'active' : ''}`}
+              onClick={() => setViewMode(viewMode === 'chart' ? 'both' : 'chart')}
+            >
+              <BarChart3 size={14} /> Chart
+            </button>
+          </div>
+        ) : null}
         <div className="results-area">
-          <ResultTable result={result} />
-          <ChartPanel result={result} />
+          {(!hasResult || viewMode === 'table' || viewMode === 'both') ? (
+            <ResultTable result={result} />
+          ) : null}
+          {hasResult && (viewMode === 'chart' || viewMode === 'both') ? (
+            <ChartPanel result={result} />
+          ) : null}
         </div>
       </main>
     </div>

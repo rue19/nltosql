@@ -1,17 +1,20 @@
 FROM python:3.11-slim
 
-# Install system dependencies if any are needed in the future
 RUN apt-get update && apt-get install -y \
+    build-essential \
+    libaio1t64 \
+    wget \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Create models directory for optional Qwen GGUF
+RUN mkdir -p /app/models
+
 WORKDIR /app
-
 COPY requirements.txt .
-RUN pip install --no-cache-dir --default-timeout=1000 --retries 10 -r requirements.txt
 
-# Pre-download the sentence-transformers model to avoid download during first run
-RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Install Python deps: no HuggingFace model download needed.
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 

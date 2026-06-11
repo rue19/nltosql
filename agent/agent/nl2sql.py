@@ -1,59 +1,126 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.prompts import ChatPromptTemplate
-from langchain.schema.output_parser import StrOutputParser
-from config import settings
-from rag.retriever import retrieve_schema_context
+import logging
 import re
+import time
 
-llm = ChatGoogleGenerativeAI(
-    model=settings.gemini_model,
-    google_api_key=settings.gemini_api_key,
-    temperature=0.0,
-)
+from config import settings
+from rag.schema_manifest import get_schema_context
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are an expert Oracle SQL query generator for an oil and gas well database.
 
-Your task:
-1. Read the user's question carefully.
-2. Use ONLY the views listed in the SCHEMA CONTEXT below. Never query base tables.
-3. Generate a single valid Oracle SQL SELECT statement.
-4. Return ONLY the SQL query, nothing else. No explanation, no markdown, no code fences.
-5. All view names must be prefixed with the schema: welldata.VIEW_NAME
-6. Follow all Oracle syntax rules provided in the schema context.
-7. If a question requires data from multiple views, join them on UWI or UBHI as appropriate.
-8. Always add a FETCH FIRST 500 ROWS ONLY clause unless the question explicitly asks for all rows.
-9. If you cannot answer the question from the available views, return exactly:
-   CANNOT_ANSWER: <brief reason>
+TASK: Convert the user's natural language question into a single valid Oracle SQL SELECT statement.
 
-SCHEMA CONTEXT:
-{schema_context}
+RULES:
+1. Use ONLY the views listed in the SCHEMA below. Never query base tables directly.
+2. Return ONLY the SQL query. No explanation, no markdown, no code fences, no backticks.
+3. All view names must be prefixed: welldata.V_VIEW_NAME
+4. Use FETCH FIRST 500 ROWS ONLY unless user asks for all rows.
+5. Use Oracle syntax: FETCH FIRST not LIMIT, NVL not COALESCE, TO_DATE for dates.
+6. For cross-view queries join on UWI = UWI, UBHI = UBHI, or UWI = UBHI.
+7. Always use table aliases and qualify all column names.
+8. If the question cannot be answered from the available views, respond with exactly:
+   CANNOT_ANSWER: <reason in one sentence>
+
+{schema}
 """
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", SYSTEM_PROMPT),
-    ("human", "{question}")
-])
 
-chain = prompt | llm | StrOutputParser()
+def _clean_sql(raw: str) -> str:
+    """Strip markdown fencing and whitespace from LLM output, and fix LIMIT syntax."""
+    raw = raw.strip()
+    raw = re.sub(r"^```sql\s*", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"^```\s*", "", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s*```$", "", raw)
+    
+    # Robustly fix LIMIT hallucinations since local models often ignore prompt instructions for Oracle syntax
+    raw = re.sub(r"\bLIMIT\s+(\d+)\b", r"FETCH FIRST \1 ROWS ONLY", raw, flags=re.IGNORECASE)
+    
+    return raw.strip()
+
+
+def _generate_with_gemini(question: str, schema: str) -> str:
+    """Call Gemini API with exponential backoff on quota errors."""
+    from google.api_core.exceptions import ResourceExhausted
+    from langchain.prompts import ChatPromptTemplate
+    from langchain.schema.output_parser import StrOutputParser
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
+    llm = ChatGoogleGenerativeAI(
+        model=settings.gemini_model,
+        google_api_key=settings.gemini_api_key,
+        temperature=0.0,
+        max_retries=0,
+    )
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", SYSTEM_PROMPT.format(schema=schema)),
+        ("human", "{question}"),
+    ])
+    chain = prompt | llm | StrOutputParser()
+
+    last_error = None
+    for attempt, wait in enumerate([0, 10, 20, 40]):
+        if wait > 0:
+            logger.warning("Gemini quota hit. Waiting %ss (attempt %s/4)...", wait, attempt + 1)
+            time.sleep(wait)
+        try:
+            return chain.invoke({"question": question})
+        except ResourceExhausted as e:
+            last_error = e
+            logger.warning("Gemini ResourceExhausted on attempt %s: %s", attempt + 1, e)
+        except Exception:
+            raise
+
+    raise last_error
+
+
+def _generate_with_qwen(question: str, schema: str) -> str:
+    """Call local Qwen GGUF model via llama-cpp-python."""
+    try:
+        from llama_cpp import Llama
+    except ImportError as exc:
+        raise RuntimeError("llama-cpp-python not installed. Cannot use local LLM.") from exc
+
+    llm = Llama(
+        model_path=settings.qwen_model_path,
+        n_ctx=settings.qwen_context_length,
+        n_threads=4,
+        verbose=False,
+    )
+
+    system_content = SYSTEM_PROMPT.format(schema=schema)
+    messages = [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": question},
+    ]
+
+    response = llm.create_chat_completion(
+        messages=messages,
+        max_tokens=settings.qwen_max_tokens,
+        temperature=settings.qwen_temperature,
+        stop=["```", "\n\n\n"],
+    )
+    return response["choices"][0]["message"]["content"]
 
 
 def generate_sql(question: str) -> tuple[str, str]:
     """
+    Generate Oracle SQL from a natural language question.
     Returns (sql_query, schema_context_used).
-    Raises ValueError if the LLM returns CANNOT_ANSWER.
+    Raises ValueError if the model returns CANNOT_ANSWER.
     """
-    schema_context = retrieve_schema_context(question, n_results=3)
-    raw = chain.invoke({
-        "question": question,
-        "schema_context": schema_context
-    }).strip()
+    schema = get_schema_context(question)
 
-    raw = re.sub(r"^```sql\s*", "", raw, flags=re.IGNORECASE)
-    raw = re.sub(r"^```\s*", "", raw, flags=re.IGNORECASE)
-    raw = re.sub(r"\s*```$", "", raw)
-    raw = raw.strip()
+    if settings.use_local_llm:
+        logger.info("Using local Qwen model for SQL generation")
+        raw = _generate_with_qwen(question, schema)
+    else:
+        logger.info("Using Gemini API for SQL generation")
+        raw = _generate_with_gemini(question, schema)
 
-    if raw.upper().startswith("CANNOT_ANSWER"):
-        raise ValueError(raw)
+    sql = _clean_sql(raw)
 
-    return raw, schema_context
+    if sql.upper().startswith("CANNOT_ANSWER"):
+        raise ValueError(sql)
+
+    return sql, schema

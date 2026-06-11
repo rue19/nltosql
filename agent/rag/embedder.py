@@ -1,59 +1,46 @@
+import logging
+import os
 import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-from .schema_manifest import VIEWS, UWI_UBHI_RULE, ORACLE_SYNTAX_RULES
-from config import settings
-import json
+
+from .schema_manifest import VIEW_DOCUMENTS
+
+logger = logging.getLogger(__name__)
+
+CHROMA_DIR = os.environ.get("CHROMA_DIR", "/app/chroma_db")
+COLLECTION_NAME = "schema_views"
 
 
 def build_vector_store():
+    """Build or load the ChromaDB vector store from schema manifest.
+    Uses ChromaDB's built-in ONNX embedding (all-MiniLM-L6-v2) - no PyTorch needed.
     """
-    Builds the ChromaDB collection from VIEWS.
-    Each document = one view entry.
-    Metadata carries view_name and join_keys for filtering.
-    Called once at agent startup if collection does not exist.
-    """
-    client = chromadb.PersistentClient(path=settings.chroma_path)
-    ef = SentenceTransformerEmbeddingFunction(
-        model_name=settings.embed_model,
-        device="cpu"
-    )
+    os.makedirs(CHROMA_DIR, exist_ok=True)
 
-    collection = client.get_or_create_collection(
-        name="schema_views",
-        embedding_function=ef,
-        metadata={"hnsw:space": "cosine"}
-    )
+    client = chromadb.PersistentClient(path=CHROMA_DIR)
 
-    if collection.count() > 0:
-        return collection
+    try:
+        collection = client.get_collection(name=COLLECTION_NAME)
+        count = collection.count()
+        logger.info("ChromaDB collection '%s' exists with %s documents", COLLECTION_NAME, count)
+        if count >= len(VIEW_DOCUMENTS):
+            return collection
+        logger.info("Collection stale (has %s, need %s). Rebuilding...", count, len(VIEW_DOCUMENTS))
+        client.delete_collection(COLLECTION_NAME)
+    except Exception:
+        logger.info("Creating new ChromaDB collection '%s'", COLLECTION_NAME)
 
-    documents = []
-    metadatas = []
-    ids = []
+    collection = client.create_collection(name=COLLECTION_NAME)
 
-    for view in VIEWS:
-        col_text = "\n".join(
-            f"  - {c['name']} ({c['type']}): {c.get('description', '')}"
-            for c in view["columns"]
-        )
-        examples = "\n".join(
-            f"  Q: {q}" for q in view.get("example_questions", [])
-        )
-        doc = (
-            f"VIEW: {view['view_name']}\n"
-            f"DESCRIPTION: {view['description']}\n"
-            f"COLUMNS:\n{col_text}\n"
-            f"JOIN KEYS: {', '.join(view['join_keys'])}\n"
-            f"EXAMPLE QUESTIONS:\n{examples}\n"
-            f"\n{UWI_UBHI_RULE}\n"
-            f"{ORACLE_SYNTAX_RULES}"
-        )
-        documents.append(doc)
-        metadatas.append({
-            "view_name": view["view_name"],
-            "join_keys": json.dumps(view["join_keys"])
-        })
-        ids.append(view["view_name"])
+    ids = [d["id"] for d in VIEW_DOCUMENTS]
+    documents = [d["text"] for d in VIEW_DOCUMENTS]
+    metadatas = [d["metadata"] for d in VIEW_DOCUMENTS]
 
-    collection.add(documents=documents, metadatas=metadatas, ids=ids)
+    collection.add(ids=ids, documents=documents, metadatas=metadatas)
+
+    logger.info("ChromaDB: indexed %s view documents", len(ids))
     return collection
+
+
+def get_collection():
+    client = chromadb.PersistentClient(path=CHROMA_DIR)
+    return client.get_collection(name=COLLECTION_NAME)

@@ -41,11 +41,49 @@ export default function ResultTable({ result }: Props) {
   const pageCount = Math.max(1, Math.ceil(result.rows.length / rowsPerPage))
   const pageRows = result.rows.slice((page - 1) * rowsPerPage, page * rowsPerPage)
 
+  const downloadCSV = () => {
+    const header = result.columns.join(",");
+    const body = result.rows.map(row =>
+      row.map(cell => {
+        if (cell === null) return "";
+        const s = String(cell);
+        // Wrap in quotes if contains comma, newline, or quote
+        return s.includes(",") || s.includes("\n") || s.includes('"')
+          ? `"${s.replace(/"/g, '""')}"`
+          : s;
+      }).join(",")
+    ).join("\n");
+    const csv = `${header}\n${body}`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href     = url;
+    a.download = `query_results_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="card table-card">
       <div className="table-header">
-        <h2>Results</h2>
-        <span>{result.row_count.toLocaleString()} rows</span>
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <h2>Results</h2>
+          <span style={{ marginLeft: 12 }}>{result.row_count.toLocaleString()} rows</span>
+          <button
+            onClick={downloadCSV}
+            style={{
+              background: "none",
+              border: "1px solid #374151",
+              borderRadius: 6,
+              color: "#9ca3af",
+              fontSize: 11,
+              padding: "4px 10px",
+              cursor: "pointer",
+              marginLeft: 12
+            }}>
+            ↓ Download CSV
+          </button>
+        </div>
       </div>
       <div className="table-wrap">
         <table>

@@ -6,3 +6,4 @@ dist/
 chroma_db/
 *.log
 oracle_data/
+models/*.gguf

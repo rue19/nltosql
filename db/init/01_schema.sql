@@ -1,8 +1,12 @@
+-- Switch to PDB
+ALTER SESSION SET CONTAINER = XEPDB1;
+
 -- Create application user
 CREATE USER welldata IDENTIFIED BY Oracle123
   DEFAULT TABLESPACE users
   QUOTA UNLIMITED ON users;
 GRANT CONNECT, RESOURCE, CREATE VIEW TO welldata;
+GRANT CREATE SESSION TO welldata;
 
 -- Base tables (never queried directly by the agent)
 CREATE TABLE welldata.WELL (
@@ -69,4 +73,23 @@ CREATE TABLE welldata.CORE_ANALYSIS (
   BULK_DENSITY  NUMBER(6,4),
   RECOVERY_PCT  NUMBER(5,2),
   CONSTRAINT pk_core PRIMARY KEY (UWI, CORE_RUN)
+);
+
+CREATE TABLE welldata.NATURAL_GAS_COMPOSITION (
+  UWI               VARCHAR2(20)  NOT NULL,
+  SAMPLE_DATE       DATE          NOT NULL,
+  METHANE_PCT       NUMBER(6,3),   -- CH4 percentage by volume
+  ETHANE_PCT        NUMBER(6,3),   -- C2H6 percentage by volume
+  PROPANE_PCT       NUMBER(6,3),   -- C3H8 percentage by volume
+  BUTANE_PCT        NUMBER(6,3),   -- C4H10 percentage by volume
+  PENTANE_PCT       NUMBER(6,3),   -- C5H12 percentage by volume
+  CO2_PCT           NUMBER(6,3),   -- Carbon dioxide percentage
+  H2S_PCT           NUMBER(6,3),   -- Hydrogen sulfide percentage
+  N2_PCT            NUMBER(6,3),   -- Nitrogen percentage
+  HEATING_VALUE_BTU NUMBER(8,2),   -- Gross heating value BTU/SCF
+  SPECIFIC_GRAVITY  NUMBER(6,4),   -- Relative to air = 1.0
+  SAMPLE_TYPE       VARCHAR2(30),  -- WELLHEAD, SEPARATOR, PIPELINE
+  LAB_REFERENCE     VARCHAR2(30),
+  CONSTRAINT pk_gas_comp PRIMARY KEY (UWI, SAMPLE_DATE),
+  CONSTRAINT fk_gas_well FOREIGN KEY (UWI) REFERENCES welldata.WELL(UWI)
 );
